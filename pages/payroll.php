@@ -1,61 +1,74 @@
 <?php
 require_once __DIR__ . '/../db.php';
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_payroll'])) {
-    $id_karyawan = (int) $_POST['id_karyawan'];
-    $bulan = (int) $_POST['bulan'];
-    $tahun = (int) $_POST['tahun'];
-
-    $employee = $conn->query('SELECT * FROM karyawan WHERE id_karyawan = ' . $id_karyawan)->fetch_assoc();
-    if (!$employee) {
-        $_SESSION['error'] = 'Karyawan tidak ditemukan.';
-        header('Location: index.php?page=payroll');
-        exit;
-    }
-
-    $umr = get_umr_value($tahun, $bulan);
-    if ($umr <= 0) {
-        $_SESSION['error'] = 'UMR untuk bulan dan tahun tersebut belum tersedia.';
-        header('Location: index.php?page=payroll');
-        exit;
-    }
-
-    $gajiPokok = (float) $employee['gaji_pokok'];
-    $totalTunjangan = 0;
-    $allowanceRows = $conn->query('SELECT dtk.*, t.nama_tunjangan, t.jumlah AS nilai_default FROM detail_tunjangan_karyawan dtk LEFT JOIN tunjangan t ON t.id_tunjangan = dtk.id_tunjangan WHERE dtk.id_karyawan = ' . $id_karyawan . ' AND dtk.status = "Aktif"');
-    while ($allowance = $allowanceRows->fetch_assoc()) {
-        $totalTunjangan += (float) ($allowance['jumlah'] ?: $allowance['nilai_default']);
-    }
-
-    $bpjs = calc_bpjs_from_umr($umr);
-    $potonganTotal = (float) $bpjs['total_bpjs'];
-    $gajiBersih = ($gajiPokok + $totalTunjangan) - $potonganTotal;
-
-    $sql = 'INSERT INTO payroll (id_karyawan, tahun, bulan, gaji_pokok, total_tunjangan, umr_referensi, bpjs_kesehatan, bpjs_ketenagakerjaan, bpjs_pensiun, total_bpjs, total_potongan, gaji_bersih, status_payroll, tanggal_bayar)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "Approved", CURDATE())
-            ON DUPLICATE KEY UPDATE
-                gaji_pokok = VALUES(gaji_pokok),
-                total_tunjangan = VALUES(total_tunjangan),
-                umr_referensi = VALUES(umr_referensi),
-                bpjs_kesehatan = VALUES(bpjs_kesehatan),
-                bpjs_ketenagakerjaan = VALUES(bpjs_ketenagakerjaan),
-                bpjs_pensiun = VALUES(bpjs_pensiun),
-                total_bpjs = VALUES(total_bpjs),
-                total_potongan = VALUES(total_potongan),
-                gaji_bersih = VALUES(gaji_bersih),
-                status_payroll = VALUES(status_payroll),
-                tanggal_bayar = CURDATE()';
-
+if (isset($_GET['slip_id'])) {
+    $id = (int) $_GET['slip_id'];
+    $sql = 'SELECT p.*, k.nama_karyawan, k.nik, k.status_kerja, d.nama_departemen, j.nama_jabatan
+            FROM payroll p
+            LEFT JOIN karyawan k ON k.id_karyawan = p.id_karyawan
+            LEFT JOIN departemen d ON d.id_departemen = k.id_departemen
+            LEFT JOIN jabatan j ON j.id_jabatan = k.id_jabatan
+            WHERE p.id_payroll = ?';
     $stmt = $conn->prepare($sql);
-    $stmt->bind_param('iiiddddddddd', $id_karyawan, $tahun, $bulan, $gajiPokok, $totalTunjangan, $umr, $bpjs['bpjs_kesehatan'], $bpjs['bpjs_ketenagakerjaan'], $bpjs['bpjs_pensiun'], $bpjs['total_bpjs'], $potonganTotal, $gajiBersih);
+    $stmt->bind_param('i', $id);
+    $stmt->execute();
+    $pay = $stmt->get_result()->fetch_assoc();
 
-    if ($stmt->execute()) {
-        $_SESSION['success'] = 'Payroll berhasil dihitung dan disimpan.';
-    } else {
-        $_SESSION['error'] = 'Gagal menghitung payroll.';
+    if (!$pay) {
+        $_SESSION['error'] = 'Slip gaji tidak ditemukan.';
+        header('Location: index.php?page=payroll');
+        exit;
     }
 
-    header('Location: index.php?page=payroll');
+    echo '<!DOCTYPE html>
+    <html lang="id">
+    <head>
+        <meta charset="UTF-8">
+        <title>Slip Gaji</title>
+        <style>
+            body { font-family: Arial, sans-serif; margin: 30px; color: #1f2937; }
+            .box { max-width: 760px; margin: 0 auto; border: 2px solid #1d4ed8; border-radius: 12px; padding: 24px; }
+            .header { display: flex; justify-content: space-between; border-bottom: 2px solid #dbeafe; padding-bottom: 12px; margin-bottom: 18px; }
+            h2 { margin: 0; color: #1d4ed8; }
+            table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+            th, td { border: 1px solid #dbeafe; padding: 10px; text-align: left; }
+            th { background: #eff6ff; }
+            .total { background: #f8fafc; font-weight: 700; }
+            .btn { display: inline-block; margin-top: 18px; padding: 10px 16px; background: #2563eb; color: white; text-decoration: none; border-radius: 8px; }
+        </style>
+    </head>
+    <body>
+        <div class="box">
+            <div class="header">
+                <div>
+                    <h2>Slip Gaji</h2>
+                    <p>Periode: ' . e($pay['bulan']) . '/' . e($pay['tahun']) . '</p>
+                </div>
+                <div>
+                    <p><strong>Nomor Slip</strong><br>#' . e($pay['id_payroll']) . '</p>
+                </div>
+            </div>
+
+            <p><strong>Nama Karyawan:</strong> ' . e($pay['nama_karyawan']) . '</p>
+            <p><strong>NIK:</strong> ' . e($pay['nik']) . ' | <strong>Jabatan:</strong> ' . e($pay['nama_jabatan']) . ' | <strong>Departemen:</strong> ' . e($pay['nama_departemen']) . '</p>
+
+            <table>
+                <tr><th>Komponen</th><th>Nominal</th></tr>
+                <tr><td>Gaji Pokok</td><td>' . format_rp($pay['gaji_pokok']) . '</td></tr>
+                <tr><td>Tunjangan</td><td>' . format_rp($pay['total_tunjangan']) . '</td></tr>
+                <tr><td>UMR Referensi</td><td>' . format_rp($pay['umr_referensi']) . '</td></tr>
+                <tr><td>BPJS Kesehatan</td><td>' . format_rp($pay['bpjs_kesehatan']) . '</td></tr>
+                <tr><td>BPJS Ketenagakerjaan</td><td>' . format_rp($pay['bpjs_ketenagakerjaan']) . '</td></tr>
+                <tr><td>BPJS Pensiun</td><td>' . format_rp($pay['bpjs_pensiun']) . '</td></tr>
+                <tr><td>Total Potongan BPJS</td><td>' . format_rp($pay['total_bpjs']) . '</td></tr>
+                <tr class="total"><td><strong>Gaji Bersih</strong></td><td><strong>' . format_rp($pay['gaji_bersih']) . '</strong></td></tr>
+            </table>
+
+            <a class="btn" href="#" onclick="window.print(); return false;">Cetak Slip</a>
+            <a class="btn" href="index.php?page=payroll" style="background:#64748b; margin-left:10px;">Kembali</a>
+        </div>
+    </body>
+    </html>';
     exit;
 }
 
@@ -107,6 +120,7 @@ $payrolls = $conn->query('SELECT p.*, k.nama_karyawan FROM payroll p LEFT JOIN k
                 <th>BPJS</th>
                 <th>Total Potongan</th>
                 <th>Gaji Bersih</th>
+                <th>Aksi</th>
             </tr>
         </thead>
         <tbody>
@@ -120,6 +134,7 @@ $payrolls = $conn->query('SELECT p.*, k.nama_karyawan FROM payroll p LEFT JOIN k
                     <td><?= format_rp($row['total_bpjs']) ?></td>
                     <td><?= format_rp($row['total_potongan']) ?></td>
                     <td><?= format_rp($row['gaji_bersih']) ?></td>
+                    <td><a href="index.php?page=payroll&slip_id=<?= $row['id_payroll'] ?>" target="_blank">Slip</a></td>
                 </tr>
             <?php endwhile; ?>
         </tbody>
