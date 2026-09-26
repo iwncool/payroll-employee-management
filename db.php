@@ -12,12 +12,26 @@ $conn->set_charset('utf8mb4');
 
 session_start();
 
+const APP_ADMIN_USER = 'admin';
+const APP_ADMIN_PASS = 'admin123';
+
 function e($value) {
     return htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8');
 }
 
 function format_rp($value) {
     return 'Rp ' . number_format((float) $value, 2, ',', '.');
+}
+
+function require_login() {
+    if (!isset($_SESSION['admin_logged_in']) || !$_SESSION['admin_logged_in']) {
+        header('Location: login.php');
+        exit;
+    }
+}
+
+function is_logged_in() {
+    return isset($_SESSION['admin_logged_in']) && $_SESSION['admin_logged_in'] === true;
 }
 
 function get_departments() {
