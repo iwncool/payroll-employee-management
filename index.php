@@ -1,6 +1,11 @@
 <?php
 require_once __DIR__ . '/db.php';
 
+if (!is_logged_in()) {
+    header('Location: login.php');
+    exit;
+}
+
 $page = $_GET['page'] ?? 'dashboard';
 ?>
 <!DOCTYPE html>
@@ -26,6 +31,7 @@ $page = $_GET['page'] ?? 'dashboard';
             <a href="index.php?page=tunjangan" class="<?= $page === 'tunjangan' ? 'active' : '' ?>">Tunjangan</a>
             <a href="index.php?page=umr" class="<?= $page === 'umr' ? 'active' : '' ?>">UMR</a>
             <a href="index.php?page=payroll" class="<?= $page === 'payroll' ? 'active' : '' ?>">Payroll</a>
+            <a href="logout.php" class="logout-link">Logout</a>
         </div>
     </nav>
 
